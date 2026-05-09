@@ -128,40 +128,88 @@ async function evaluateListings(criteria, items, proxyUrl, token) {
   }
 }
 
-async function fetchViaProxy(targetUrl, proxyUrl, token) {
+async function fetchViaProxy(targetUrl, proxyUrl, token, { extract } = {}) {
   if (!proxyUrl) throw new Error('Proxy URL not configured');
-  const url = withToken(
-    `${proxyUrl.replace(/\/$/, '')}/yad2?url=${encodeURIComponent(targetUrl)}`,
-    token,
-  );
+  const params = new URLSearchParams({ url: targetUrl });
+  if (extract) params.set('extract', extract);
+  const url = withToken(`${proxyUrl.replace(/\/$/, '')}/yad2?${params.toString()}`, token);
   const r = await fetch(url);
-  if (!r.ok) throw new Error(`Yad2 proxy ${r.status}`);
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    throw new Error(`Yad2 proxy ${r.status}: ${text.slice(0, 200)}`);
+  }
   const ct = r.headers.get('Content-Type') || '';
   if (ct.includes('json')) return r.json();
   const text = await r.text();
   try { return JSON.parse(text); } catch { return text; }
 }
 
-async function fetchManufacturers(proxyUrl, token, category = 'cars') {
-  try {
-    const data = await fetchViaProxy(
-      `https://gw.yad2.co.il/feed-search-legacy/vehicles/${category}/manufacturers`,
-      proxyUrl, token,
-    );
-    return data?.data || data?.manufacturers || data || null;
-  } catch { return null; }
+async function fetchListings(webUrl, proxyUrl, token) {
+  const data = await fetchViaProxy(webUrl, proxyUrl, token, { extract: 'next' });
+  if (typeof data === 'string') {
+    throw new Error('Yad2 returned non-JSON; site may be under challenge');
+  }
+  const items = findListingsInData(data);
+  if (typeof window !== 'undefined') {
+    console.log('[yad2] found', items.length, 'items');
+    if (items[0]) {
+      console.log('[yad2] first item keys:', Object.keys(items[0]));
+      console.log('[yad2] first item sample:', JSON.stringify(items[0]).slice(0, 800));
+    } else {
+      console.log('[yad2] __NEXT_DATA__ top-level keys:', Object.keys(data || {}));
+    }
+  }
+  return items.map(normalizeListing);
 }
 
-async function fetchListings(apiUrl, proxyUrl, token) {
-  const data = await fetchViaProxy(apiUrl, proxyUrl, token);
-  return data?.data?.feed?.feed_items || data?.feed?.feed_items || data?.results || [];
+function findListingsInData(data) {
+  if (!data || typeof data !== 'object') return [];
+  let best = [];
+  const visit = (node) => {
+    if (Array.isArray(node)) {
+      if (node.length > best.length && typeof node[0] === 'object' && node[0] !== null) {
+        const keys = Object.keys(node[0]);
+        if (keys.some(k => /price|manufacturer|model|year|km|hand|vehicle|orderId|adNumber/i.test(k))) {
+          best = node;
+        }
+      }
+      for (const item of node) visit(item);
+    } else if (node && typeof node === 'object') {
+      for (const v of Object.values(node)) visit(v);
+    }
+  };
+  visit(data);
+  return best;
 }
 
-// ---- URL builders ----
-function buildYad2WebUrl(filters, manufacturerId) {
+function normalizeListing(it) {
+  const p = it.price;
+  const price = (typeof p === 'object' && p)
+    ? (p.value ?? p.amount ?? p.price)
+    : p;
+  return {
+    ...it,
+    id: it.id || it.orderId || it.adNumber || it.ad_number || it.token || it.link_token,
+    manufacturer: it.manufacturer || it.brand || it.vehicle?.manufacturer,
+    model: it.model || it.model_name || it.vehicle?.model,
+    sub_model: it.sub_model || it.subModel || it.trim || it.vehicle?.sub_model,
+    year: it.year || it.production_year || it.vehicle?.year,
+    km: it.km || it.kilometers || it.vehicle?.km,
+    hand: it.hand ?? it.vehicle?.hand,
+    price,
+    city: it.city || it.address?.city || it.location?.city,
+    images: it.images || (it.image ? [it.image] : undefined),
+    token: it.link_token || it.token || it.id,
+  };
+}
+
+// ---- URL builder ----
+// Yad2 accepts the same query params on the public web URL as on the (now-dead)
+// gateway. Manufacturer/model are matched client-side post-fetch since the
+// manufacturer-ID lookup endpoint is also gone.
+function buildYad2WebUrl(filters) {
   const cat = CATEGORIES[filters.category] || 'cars';
   const params = new URLSearchParams();
-  if (manufacturerId) params.set('manufacturer', String(manufacturerId));
   if (filters.year_min || filters.year_max) {
     params.set('year', `${filters.year_min || 1900}-${filters.year_max || 2030}`);
   }
@@ -177,41 +225,9 @@ function buildYad2WebUrl(filters, manufacturerId) {
   return `https://www.yad2.co.il/vehicles/${cat}${qs ? '?' + qs : ''}`;
 }
 
-function buildYad2ApiUrl(filters, manufacturerId) {
-  const cat = CATEGORIES[filters.category] || 'cars';
-  const params = new URLSearchParams();
-  if (manufacturerId) params.set('manufacturer', String(manufacturerId));
-  if (filters.year_min || filters.year_max) {
-    params.set('year', `${filters.year_min || 1900}-${filters.year_max || 2030}`);
-  }
-  if (filters.price_min || filters.price_max) {
-    params.set('price', `${filters.price_min || 0}-${filters.price_max || 9999999}`);
-  }
-  if (filters.km_max != null) params.set('km', `0-${filters.km_max}`);
-  if (filters.hand_max != null) params.set('hand', `0-${filters.hand_max}`);
-  if (filters.gearbox && GEARBOX[filters.gearbox]) params.set('gearBox', String(GEARBOX[filters.gearbox]));
-  if (filters.fuel && FUEL[filters.fuel]) params.set('engineType', String(FUEL[filters.fuel]));
-  params.set('priceOnly', '1');
-  return `https://gw.yad2.co.il/feed-search-legacy/vehicles/${cat}?${params.toString()}`;
-}
-
-// ---- Helpers ----
-const normalizeBrand = (s) => (s || '').toLowerCase().replace(/[\s\-_]/g, '');
-
-function lookupManufacturerId(list, name) {
-  if (!list || !name) return null;
-  const norm = normalizeBrand(name);
-  const arr = Array.isArray(list) ? list : (list.list || list.items || []);
-  for (const m of arr) {
-    const candidates = [m.title, m.text, m.name, m.englishTitle, m.titleEng, m.label].filter(Boolean);
-    for (const c of candidates) {
-      const cn = normalizeBrand(c);
-      if (cn === norm || cn.includes(norm) || norm.includes(cn)) {
-        return m.id ?? m.value ?? m.code;
-      }
-    }
-  }
-  return null;
+function textIncludesAny(haystack, needles) {
+  const h = (haystack || '').toLowerCase();
+  return needles.some(n => n && h.includes(n.toLowerCase()));
 }
 
 const EXAMPLES = [
@@ -235,8 +251,6 @@ export default function App() {
   const [evaluations, setEvaluations] = useState(null);
   const [error, setError] = useState(null);
   const [recent, setRecent] = useState([]);
-  const [manufacturers, setManufacturers] = useState(null);
-  const [manufacturerId, setManufacturerId] = useState(null);
 
   useEffect(() => {
     const r = ls.get('recent');
@@ -247,12 +261,6 @@ export default function App() {
     if (t) setProxyToken(t);
     if (!p && !import.meta.env.VITE_PROXY_URL) setShowSettings(true);
   }, []);
-
-  useEffect(() => {
-    if (proxyUrl) {
-      fetchManufacturers(proxyUrl, proxyToken).then(setManufacturers);
-    }
-  }, [proxyUrl, proxyToken]);
 
   function saveProxy(url, token) {
     setProxyUrl(url);
@@ -284,28 +292,21 @@ export default function App() {
       const parsed = await parsePrompt(text, proxyUrl, proxyToken);
       setFilters(parsed);
 
-      let mfgList = manufacturers;
-      if (!mfgList) {
-        mfgList = await fetchManufacturers(proxyUrl, proxyToken, parsed.category || 'cars');
-        if (mfgList) setManufacturers(mfgList);
-      }
-      const mfgId = lookupManufacturerId(mfgList, parsed.manufacturer || parsed.manufacturer_he);
-      setManufacturerId(mfgId);
-
-      const web = buildYad2WebUrl(parsed, mfgId);
-      const api = buildYad2ApiUrl(parsed, mfgId);
+      const web = buildYad2WebUrl(parsed);
       setWebUrl(web);
 
       setStage('fetching');
-      let items = await fetchListings(api, proxyUrl, proxyToken);
+      let items = await fetchListings(web, proxyUrl, proxyToken);
 
-      if (parsed.model) {
-        const m = parsed.model.toLowerCase();
-        const mh = (parsed.model_he || '').toLowerCase();
+      const mfgNeedles = [parsed.manufacturer, parsed.manufacturer_he].filter(Boolean);
+      const modelNeedles = [parsed.model, parsed.model_he].filter(Boolean);
+      if (mfgNeedles.length || modelNeedles.length) {
         items = items.filter(it => {
-          const fields = [it.model, it.sub_model, it.title, it.title_1, it.manufacturer]
-            .filter(Boolean).join(' ').toLowerCase();
-          return fields.includes(m) || (mh && fields.includes(mh));
+          const fields = [it.manufacturer, it.model, it.sub_model, it.title, it.title_1]
+            .filter(Boolean).join(' ');
+          const okMfg = !mfgNeedles.length || textIncludesAny(fields, mfgNeedles);
+          const okModel = !modelNeedles.length || textIncludesAny(fields, modelNeedles);
+          return okMfg && okModel;
         });
       }
 
@@ -442,7 +443,7 @@ export default function App() {
             <div className="text-xs text-zinc-500 uppercase tracking-wide mb-2">Understood as</div>
             <div className="text-sm text-zinc-100 mb-3" dir="auto">{filters.interpretation}</div>
             <div className="flex flex-wrap gap-1.5">
-              {filters.manufacturer && <Chip label={`brand: ${filters.manufacturer}`} warn={!manufacturerId} />}
+              {filters.manufacturer && <Chip label={`brand: ${filters.manufacturer}`} />}
               {filters.model && <Chip label={`model: ${filters.model}`} info />}
               {filters.year_min && <Chip label={`year ≥ ${filters.year_min}`} />}
               {filters.year_max && <Chip label={`year ≤ ${filters.year_max}`} />}
