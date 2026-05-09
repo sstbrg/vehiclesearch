@@ -8,16 +8,16 @@ Natural-language search over Yad2 vehicles, with AI scoring each listing against
 Browser (React/Vite)
    │
    ├──→ /yad2?url=...      ──→ gw.yad2.co.il (browses listings)
-   └──→ /claude POST       ──→ api.anthropic.com (parses + evaluates)
+   └──→ /gemini POST       ──→ generativelanguage.googleapis.com (parses + evaluates)
         │
         Cloudflare Worker (yad2-ai)
-        – ANTHROPIC_API_KEY secret
-        – PROXY_TOKEN secret (optional)
+        – GEMINI_API_KEY secret
+        – PROXY_TOKEN secret (optional, gates both endpoints)
 ```
 
 The Worker exists for two reasons:
 1. Yad2 blocks browser-origin fetches (Cloudflare/PerimeterX); a server-side proxy with the right headers gets through and adds CORS.
-2. Anthropic API key must never live in the browser.
+2. Gemini API key must never live in the browser.
 
 ## Deploy
 
@@ -25,7 +25,7 @@ The Worker exists for two reasons:
 
 ```bash
 npm install
-cd worker && wrangler deploy && wrangler secret put ANTHROPIC_API_KEY && cd ..
+cd worker && wrangler deploy && wrangler secret put GEMINI_API_KEY && cd ..
 cp .env.example .env  # edit VITE_PROXY_URL
 npm run dev
 ```
@@ -37,11 +37,10 @@ npm run dev
 | Secret | Where to get it |
 |--------|----------------|
 | `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
-| `CLOUDFLARE_ACCOUNT_ID` | Right sidebar of any zone in Cloudflare dashboard |
-| `ANTHROPIC_API_KEY`    | console.anthropic.com → API keys |
-| `PROXY_TOKEN`          | Optional. Random string if you want to gate `/yad2` and `/claude` |
+| `CLOUDFLARE_ACCOUNT_ID` | Right sidebar of Workers & Pages, or in the dashboard URL |
+| `GEMINI_API_KEY`       | https://aistudio.google.com/apikey (free tier, no card required) |
 
-The action uses `cloudflare/wrangler-action@v3` and pushes the secrets to the Worker on each deploy.
+The action uses `cloudflare/wrangler-action@v3` and pushes `GEMINI_API_KEY` to the Worker on each deploy. To enable the optional `PROXY_TOKEN` gate later, add the secret in GitHub and re-add it to the `secrets:` block in the workflow.
 
 ## Custom domain on steinberg-tech.com
 
@@ -50,7 +49,7 @@ Domain must be on Cloudflare DNS (free plan is fine). Then in `worker/wrangler.t
 ## Costs
 
 - Cloudflare Workers free tier: 100k requests/day
-- Anthropic API: pay-per-use; one search = 1 parse call (~1k tokens) + 1 evaluation call (~3-5k tokens) ≈ $0.01-0.03 per search with Sonnet 4.6
+- Google AI Studio free tier (Gemini 2.5 Flash): generous daily quota for personal use; one search = 1 parse call + 1 evaluation call. Hard limits and rate caps at https://ai.google.dev/gemini-api/docs/rate-limits
 
 ## Known limits
 

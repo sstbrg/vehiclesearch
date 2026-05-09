@@ -27,8 +27,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: worker
           secrets: |
-            ANTHROPIC_API_KEY
-            PROXY_TOKEN
+            GEMINI_API_KEY
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          PROXY_TOKEN: ${{ secrets.PROXY_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}

@@ -4,8 +4,8 @@ import {
   Sparkles, ArrowRight, Settings, X, Check, Star,
 } from 'lucide-react';
 
-// Update if you upgrade the model
-const MODEL = 'claude-sonnet-4-6';
+// Update if you swap models. Free tier on AI Studio.
+const MODEL = 'gemini-2.5-flash';
 
 const CATEGORIES = {
   cars: 'cars',
@@ -76,28 +76,31 @@ function withToken(url, token) {
   return url + (url.includes('?') ? '&' : '?') + 't=' + encodeURIComponent(token);
 }
 
-async function callClaude(systemPrompt, userContent, maxTokens, proxyUrl, token) {
-  const r = await fetch(withToken(`${proxyUrl.replace(/\/$/, '')}/claude`, token), {
+async function callGemini(systemPrompt, userContent, maxTokens, proxyUrl, token) {
+  const r = await fetch(withToken(`${proxyUrl.replace(/\/$/, '')}/gemini?model=${MODEL}`, token), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: MODEL,
-      max_tokens: maxTokens,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userContent }],
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: 'user', parts: [{ text: userContent }] }],
+      generationConfig: {
+        maxOutputTokens: maxTokens,
+        responseMimeType: 'application/json',
+      },
     }),
   });
   if (!r.ok) {
     const errText = await r.text().catch(() => '');
-    throw new Error(`Claude proxy ${r.status}: ${errText.slice(0, 200)}`);
+    throw new Error(`Gemini proxy ${r.status}: ${errText.slice(0, 200)}`);
   }
   const data = await r.json();
-  const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+  const text = (data.candidates?.[0]?.content?.parts || [])
+    .map(p => p.text || '').join('');
   return text.replace(/```json|```/g, '').trim();
 }
 
 async function parsePrompt(prompt, proxyUrl, token) {
-  const text = await callClaude(PARSE_SYSTEM, prompt, 1000, proxyUrl, token);
+  const text = await callGemini(PARSE_SYSTEM, prompt, 1000, proxyUrl, token);
   return JSON.parse(text);
 }
 
@@ -116,7 +119,7 @@ async function evaluateListings(criteria, items, proxyUrl, token) {
     ].filter(Boolean).join(' | '),
   }));
   const prompt = `Buyer criteria: ${criteria}\n\nListings (${slim.length}):\n${JSON.stringify(slim)}`;
-  const text = await callClaude(EVAL_SYSTEM, prompt, 3500, proxyUrl, token);
+  const text = await callGemini(EVAL_SYSTEM, prompt, 3500, proxyUrl, token);
   try {
     return JSON.parse(text);
   } catch {
@@ -614,7 +617,7 @@ function SettingsModal({ proxyUrl, proxyToken, onSave, onClose }) {
               placeholder="https://yad2-ai.steinberg-tech.com"
               className="w-full bg-zinc-950 border border-zinc-800 rounded-lg p-2.5 text-sm focus:outline-none focus:border-amber-400/50" dir="ltr" />
             <p className="mt-1.5 text-xs text-zinc-500 leading-relaxed">
-              The Cloudflare Worker that proxies Yad2 + Anthropic. Endpoints: <code className="bg-zinc-800 px-1 rounded">/yad2</code>, <code className="bg-zinc-800 px-1 rounded">/claude</code>.
+              The Cloudflare Worker that proxies Yad2 + Gemini. Endpoints: <code className="bg-zinc-800 px-1 rounded">/yad2</code>, <code className="bg-zinc-800 px-1 rounded">/gemini</code>.
             </p>
           </div>
 

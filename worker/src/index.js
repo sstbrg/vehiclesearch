@@ -4,7 +4,8 @@ const ALLOWED_YAD2 = [
   'https://api.yad2.co.il/',
 ];
 
-const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages';
+const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -32,11 +33,11 @@ export default {
     if (url.pathname === '/yad2' || url.pathname === '/yad2/') {
       return handleYad2(url);
     }
-    if (url.pathname === '/claude' || url.pathname === '/claude/') {
-      return handleClaude(request, env);
+    if (url.pathname === '/gemini' || url.pathname === '/gemini/') {
+      return handleGemini(request, url, env);
     }
     if (url.pathname === '/' || url.pathname === '/health') {
-      return json({ ok: true, endpoints: ['/yad2', '/claude'] });
+      return json({ ok: true, endpoints: ['/yad2', '/gemini'] });
     }
     return json({ error: 'not found' }, 404);
   },
@@ -71,21 +72,24 @@ async function handleYad2(url) {
   }
 }
 
-async function handleClaude(request, env) {
+async function handleGemini(request, url, env) {
   if (request.method !== 'POST') {
     return json({ error: 'POST only' }, 405);
   }
-  if (!env.ANTHROPIC_API_KEY) {
-    return json({ error: 'ANTHROPIC_API_KEY secret not set' }, 500);
+  if (!env.GEMINI_API_KEY) {
+    return json({ error: 'GEMINI_API_KEY secret not set' }, 500);
+  }
+  const model = url.searchParams.get('model') || DEFAULT_GEMINI_MODEL;
+  if (!/^[a-zA-Z0-9._-]+$/.test(model)) {
+    return json({ error: 'invalid model name' }, 400);
   }
   try {
     const body = await request.text();
-    const upstream = await fetch(ANTHROPIC_API, {
+    const upstream = await fetch(`${GEMINI_BASE}/models/${model}:generateContent`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-api-key': env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
+        'x-goog-api-key': env.GEMINI_API_KEY,
       },
       body,
     });
