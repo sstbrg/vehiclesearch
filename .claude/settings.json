@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "enabledMcpjsonServers": [
+    "cloudflare-bindings",
+    "cloudflare-builds",
+    "cloudflare-observability",
+    "cloudflare-docs"
+  ]
+}
