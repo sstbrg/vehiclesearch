@@ -16,7 +16,7 @@ Browser (React/Vite)
 ```
 
 The Worker exists for two reasons:
-1. Yad2 blocks browser-origin fetches (Cloudflare/PerimeterX); a server-side proxy with the right headers gets through and adds CORS.
+1. Yad2 blocks browser-origin fetches and challenges suspicious server traffic via Radware Bot Manager; a server-side proxy with the right headers + cookies gets through and adds CORS.
 2. Gemini API key must never live in the browser.
 
 ## Deploy
