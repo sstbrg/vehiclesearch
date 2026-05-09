@@ -42,6 +42,14 @@ npm run dev
 
 The action uses `cloudflare/wrangler-action@v3` and pushes `GEMINI_API_KEY` to the Worker on each deploy. To enable the optional `PROXY_TOKEN` gate later, add the secret in GitHub and re-add it to the `secrets:` block in the workflow.
 
+### Frontend on Cloudflare Pages
+
+`.github/workflows/deploy-pages.yml` builds the Vite app and deploys it to a Cloudflare Pages project named `yad2-ai-search`. The build bakes `VITE_PROXY_URL=https://yad2-ai.sstbrg.workers.dev` into the bundle.
+
+Reuses the same `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` secrets as the Worker workflow. **The token needs `Cloudflare Pages:Edit` in addition to Workers permissions.** If the deploy fails with a 403, edit the token at https://dash.cloudflare.com/profile/api-tokens and add the Pages permission, or re-create with a custom token covering both.
+
+After the first successful run the app is live at `https://yad2-ai-search.pages.dev`.
+
 ## Custom domain on steinberg-tech.com
 
 Domain must be on Cloudflare DNS (free plan is fine). Then in `worker/wrangler.toml` uncomment the `routes` block and `wrangler deploy`. The DNS record + TLS cert are auto-created.
