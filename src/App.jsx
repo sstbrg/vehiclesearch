@@ -151,26 +151,39 @@ async function fetchListings(webUrl, proxyUrl, token) {
   }
   const items = findListingsInData(data);
   if (typeof window !== 'undefined') {
-    console.log('[yad2] found', items.length, 'items');
+    console.log('[yad2] found', items.length, 'listings');
     if (items[0]) {
       console.log('[yad2] first item keys:', Object.keys(items[0]));
-      console.log('[yad2] first item sample:', JSON.stringify(items[0]).slice(0, 800));
-    } else {
-      console.log('[yad2] __NEXT_DATA__ top-level keys:', Object.keys(data || {}));
+      console.log('[yad2] first item sample:', JSON.stringify(items[0]).slice(0, 1000));
     }
+  }
+  if (items.length === 0) {
+    const topKeys = Object.keys(data || {}).join(', ');
+    throw new Error(`No listings array found in __NEXT_DATA__ (top-level keys: ${topKeys}). Check console for structure.`);
   }
   return items.map(normalizeListing);
 }
 
+// Score how listing-like an item is by counting fields that look like ad data.
+const LISTING_KEY_RE = /^(price|year|yearOfProduction|km|kilometers|hand|model|manufacturer|sub_?model|trim|engineType|gearBox|engine|images?|row_?\d|orderId|adNumber|ad_?number|token|merchant|customer|hubName|address|location|productionYear|spec)/i;
+
+function listingScore(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return 0;
+  return Object.keys(obj).reduce((n, k) => n + (LISTING_KEY_RE.test(k) ? 1 : 0), 0);
+}
+
 function findListingsInData(data) {
   if (!data || typeof data !== 'object') return [];
-  let best = [];
+  let best = { array: [], rank: 0 };
   const visit = (node) => {
     if (Array.isArray(node)) {
-      if (node.length > best.length && typeof node[0] === 'object' && node[0] !== null) {
-        const keys = Object.keys(node[0]);
-        if (keys.some(k => /price|manufacturer|model|year|km|hand|vehicle|orderId|adNumber/i.test(k))) {
-          best = node;
+      if (node.length > 0) {
+        const score = listingScore(node[0]);
+        // Need real listing-shape (>= 3 listing keys), then prefer larger arrays
+        // among equally-shaped candidates.
+        if (score >= 3) {
+          const rank = score * 1000 + Math.min(node.length, 100);
+          if (rank > best.rank) best = { array: node, rank };
         }
       }
       for (const item of node) visit(item);
@@ -179,7 +192,7 @@ function findListingsInData(data) {
     }
   };
   visit(data);
-  return best;
+  return best.array;
 }
 
 function normalizeListing(it) {
@@ -187,19 +200,28 @@ function normalizeListing(it) {
   const price = (typeof p === 'object' && p)
     ? (p.value ?? p.amount ?? p.price)
     : p;
+  // Yad2's image shape: metaData.images.list = ["url", ...] OR images = [{src}]
+  const imageList =
+    it.metaData?.images?.list
+    || it.metaData?.coverImage && [it.metaData.coverImage]
+    || it.images
+    || (it.image ? [it.image] : undefined);
   return {
     ...it,
     id: it.id || it.orderId || it.adNumber || it.ad_number || it.token || it.link_token,
-    manufacturer: it.manufacturer || it.brand || it.vehicle?.manufacturer,
-    model: it.model || it.model_name || it.vehicle?.model,
-    sub_model: it.sub_model || it.subModel || it.trim || it.vehicle?.sub_model,
-    year: it.year || it.production_year || it.vehicle?.year,
+    manufacturer: it.manufacturer || it.brand || it.vehicle?.manufacturer || it.manufacturerText,
+    model: it.model || it.model_name || it.vehicle?.model || it.modelText,
+    sub_model: it.sub_model || it.subModel || it.trim || it.vehicle?.sub_model || it.subModelText,
+    year: it.year || it.yearOfProduction || it.production_year || it.productionYear || it.vehicle?.year,
     km: it.km || it.kilometers || it.vehicle?.km,
     hand: it.hand ?? it.vehicle?.hand,
     price,
     city: it.city || it.address?.city || it.location?.city,
-    images: it.images || (it.image ? [it.image] : undefined),
-    token: it.link_token || it.token || it.id,
+    images: imageList,
+    token: it.token || it.link_token || it.adNumber || it.id,
+    title_1: it.title_1 || it.row_1 || it.title,
+    title_2: it.title_2 || it.row_2,
+    info_text: it.info_text || it.row_3 || it.search_text || it.description,
   };
 }
 
