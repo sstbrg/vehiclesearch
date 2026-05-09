@@ -1,6 +1,7 @@
 const ALLOWED_YAD2 = [
   'https://gw.yad2.co.il/',
   'https://www.yad2.co.il/',
+  'https://m.yad2.co.il/',
   'https://api.yad2.co.il/',
 ];
 
