@@ -31,6 +31,14 @@ jobs:
         env:
           VITE_PROXY_URL: https://yad2-ai.sstbrg.workers.dev
 
+      - name: Create Pages project if missing
+        uses: cloudflare/wrangler-action@v3
+        continue-on-error: true
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages project create yad2-ai-search --production-branch=main
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
