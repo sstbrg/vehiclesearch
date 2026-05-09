@@ -1,0 +1,12 @@
+name = "yad2-ai"
+main = "src/index.js"
+compatibility_date = "2025-01-15"
+
+# Uncomment after steinberg-tech.com is on Cloudflare DNS:
+# routes = [
+#   { pattern = "yad2-ai.steinberg-tech.com", custom_domain = true }
+# ]
+
+# Set secrets via CLI (NOT in this file):
+#   wrangler secret put ANTHROPIC_API_KEY
+#   wrangler secret put PROXY_TOKEN     # optional
