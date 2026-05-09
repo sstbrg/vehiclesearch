@@ -45,6 +45,7 @@ export default {
 
 async function handleYad2(url) {
   const target = url.searchParams.get('url');
+  const extract = url.searchParams.get('extract');
   if (!target || !ALLOWED_YAD2.some(p => target.startsWith(p))) {
     return json({ error: 'bad target URL' }, 400);
   }
@@ -58,6 +59,27 @@ async function handleYad2(url) {
       },
       cf: { cacheTtl: 60, cacheEverything: true },
     });
+
+    if (extract === 'next') {
+      const html = await upstream.text();
+      const m = html.match(/<script[^>]*id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+      if (!m) {
+        return json({
+          error: 'no __NEXT_DATA__ found in page',
+          upstreamStatus: upstream.status,
+          contentType: upstream.headers.get('Content-Type'),
+          snippet: html.slice(0, 400),
+        }, 502);
+      }
+      let parsed;
+      try { parsed = JSON.parse(m[1]); }
+      catch (e) { return json({ error: 'parse __NEXT_DATA__ failed', message: e.message }, 502); }
+      return new Response(JSON.stringify(parsed), {
+        status: 200,
+        headers: { ...CORS, 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
+      });
+    }
+
     const body = await upstream.text();
     return new Response(body, {
       status: upstream.status,
