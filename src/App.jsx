@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Component } from 'react';
 import {
   ExternalLink, Loader2, Car, AlertCircle, Clock, Trash2,
   Sparkles, ArrowRight, Settings, X, Check, Star,
@@ -261,7 +261,28 @@ const EXAMPLES = [
 ];
 
 // ---- Component ----
-export default function App() {
+class ErrorBoundary extends Component {
+  state = { error: null };
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) { console.error('[boundary]', error, info); }
+  render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <div className="min-h-screen bg-zinc-950 text-rose-100 p-4">
+        <div className="max-w-3xl mx-auto p-4 bg-rose-950/60 border border-rose-900 rounded-xl">
+          <div className="font-bold mb-2 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4" /> Render error
+          </div>
+          <pre className="text-xs whitespace-pre-wrap text-rose-200/90">{String(this.state.error?.stack || this.state.error)}</pre>
+          <button onClick={() => this.setState({ error: null })}
+                  className="mt-3 text-xs bg-rose-900 hover:bg-rose-800 rounded px-2 py-1">Reset</button>
+        </div>
+      </div>
+    );
+  }
+}
+
+function App() {
   const [prompt, setPrompt] = useState('');
   const [proxyUrl, setProxyUrl] = useState(import.meta.env.VITE_PROXY_URL || '');
   const [proxyToken, setProxyToken] = useState(import.meta.env.VITE_PROXY_TOKEN || '');
@@ -273,6 +294,7 @@ export default function App() {
   const [evaluations, setEvaluations] = useState(null);
   const [error, setError] = useState(null);
   const [recent, setRecent] = useState([]);
+  const [diag, setDiag] = useState(null);
 
   useEffect(() => {
     const r = ls.get('recent');
@@ -308,7 +330,7 @@ export default function App() {
     if (!proxyUrl) { setShowSettings(true); return; }
 
     setError(null); setListings(null); setEvaluations(null);
-    setFilters(null); setWebUrl(null); setStage('parsing');
+    setFilters(null); setWebUrl(null); setDiag(null); setStage('parsing');
 
     try {
       const parsed = await parsePrompt(text, proxyUrl, proxyToken);
@@ -319,18 +341,27 @@ export default function App() {
 
       setStage('fetching');
       let items = await fetchListings(web, proxyUrl, proxyToken);
+      const preFilterCount = items.length;
 
       const mfgNeedles = [parsed.manufacturer, parsed.manufacturer_he].filter(Boolean);
       const modelNeedles = [parsed.model, parsed.model_he].filter(Boolean);
       if (mfgNeedles.length || modelNeedles.length) {
         items = items.filter(it => {
-          const fields = [it.manufacturer, it.model, it.sub_model, it.title, it.title_1]
-            .filter(Boolean).join(' ');
-          const okMfg = !mfgNeedles.length || textIncludesAny(fields, mfgNeedles);
-          const okModel = !modelNeedles.length || textIncludesAny(fields, modelNeedles);
+          // Search the entire serialized listing — Yad2's manufacturer/model
+          // can be Hebrew, English, or numeric IDs depending on tier.
+          const haystack = JSON.stringify(it);
+          const okMfg = !mfgNeedles.length || textIncludesAny(haystack, mfgNeedles);
+          const okModel = !modelNeedles.length || textIncludesAny(haystack, modelNeedles);
           return okMfg && okModel;
         });
       }
+
+      setDiag({
+        webUrl: web,
+        preFilterCount,
+        postFilterCount: items.length,
+        firstKeys: items[0] ? Object.keys(items[0]).slice(0, 30) : null,
+      });
 
       items = items.slice(0, 25);
       setListings(items);
@@ -505,8 +536,21 @@ export default function App() {
               )}
             </div>
             {sortedListings.length === 0 && (
-              <div className="text-sm text-zinc-400 p-4 bg-zinc-900 rounded-xl border border-zinc-800">
-                No matches with these filters. Try widening price or year range.
+              <div className="text-sm text-zinc-400 p-4 bg-zinc-900 rounded-xl border border-zinc-800 space-y-2">
+                <div>No matches with these filters. Try widening price or year range.</div>
+                {diag && (
+                  <div className="text-xs text-zinc-500 border-t border-zinc-800 pt-2">
+                    <div>Worker fetched <span className="text-zinc-400">{diag.preFilterCount}</span> listings; <span className="text-zinc-400">{diag.postFilterCount}</span> matched filters.</div>
+                    {diag.firstKeys && (
+                      <details className="mt-1">
+                        <summary className="cursor-pointer">first item keys</summary>
+                        <code className="text-[10px] break-all">{diag.firstKeys.join(', ')}</code>
+                      </details>
+                    )}
+                    <a href={diag.webUrl} target="_blank" rel="noopener noreferrer"
+                       className="text-amber-400 hover:text-amber-300 inline-block mt-1">open the same search on Yad2 →</a>
+                  </div>
+                )}
               </div>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -678,3 +722,12 @@ function SettingsModal({ proxyUrl, proxyToken, onSave, onClose }) {
     </div>
   );
 }
+
+export default function AppWithBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
