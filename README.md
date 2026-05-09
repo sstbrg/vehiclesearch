@@ -21,12 +21,27 @@ The Worker exists for two reasons:
 
 ## Deploy
 
+### Option A: Local wrangler (one-time)
+
 ```bash
 npm install
 cd worker && wrangler deploy && wrangler secret put ANTHROPIC_API_KEY && cd ..
 cp .env.example .env  # edit VITE_PROXY_URL
 npm run dev
 ```
+
+### Option B: GitHub Actions (auto-deploy on push to main)
+
+`.github/workflows/deploy-worker.yml` deploys the Worker on every push to `main` that touches `worker/**`, and can also be run manually via the Actions tab. Add these repo secrets at **Settings → Secrets and variables → Actions**:
+
+| Secret | Where to get it |
+|--------|----------------|
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → "Edit Cloudflare Workers" template |
+| `CLOUDFLARE_ACCOUNT_ID` | Right sidebar of any zone in Cloudflare dashboard |
+| `ANTHROPIC_API_KEY`    | console.anthropic.com → API keys |
+| `PROXY_TOKEN`          | Optional. Random string if you want to gate `/yad2` and `/claude` |
+
+The action uses `cloudflare/wrangler-action@v3` and pushes the secrets to the Worker on each deploy.
 
 ## Custom domain on steinberg-tech.com
 
