@@ -144,24 +144,45 @@ async function fetchViaProxy(targetUrl, proxyUrl, token, { extract } = {}) {
   try { return JSON.parse(text); } catch { return text; }
 }
 
-async function fetchListings(webUrl, proxyUrl, token) {
-  const data = await fetchViaProxy(webUrl, proxyUrl, token, { extract: 'next' });
-  if (typeof data === 'string') {
-    throw new Error('Yad2 returned non-JSON; site may be under challenge');
+async function fetchListings(webUrl, proxyUrl, token, { pages = 5 } = {}) {
+  const urls = Array.from({ length: pages }, (_, i) => {
+    const u = new URL(webUrl);
+    if (i > 0) u.searchParams.set('page', String(i + 1));
+    return u.toString();
+  });
+  const results = await Promise.allSettled(
+    urls.map(u => fetchViaProxy(u, proxyUrl, token, { extract: 'next' })),
+  );
+  const items = [];
+  let firstErr = null;
+  let topKeys = null;
+  for (const r of results) {
+    if (r.status !== 'fulfilled') { if (!firstErr) firstErr = r.reason; continue; }
+    const data = r.value;
+    if (typeof data === 'string') continue;
+    if (!topKeys) topKeys = Object.keys(data || {});
+    items.push(...findListingsInData(data));
   }
-  const items = findListingsInData(data);
+  // De-dupe by id/token across pages.
+  const seen = new Set();
+  const uniq = items.filter(it => {
+    const k = it.id || it.orderId || it.adNumber || it.token || JSON.stringify(it).slice(0, 200);
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
   if (typeof window !== 'undefined') {
-    console.log('[yad2] found', items.length, 'listings');
-    if (items[0]) {
-      console.log('[yad2] first item keys:', Object.keys(items[0]));
-      console.log('[yad2] first item sample:', JSON.stringify(items[0]).slice(0, 1000));
+    console.log('[yad2] fetched', items.length, 'listings (', uniq.length, 'after dedupe) across', pages, 'pages');
+    if (uniq[0]) {
+      console.log('[yad2] first item keys:', Object.keys(uniq[0]));
+      console.log('[yad2] first item sample:', JSON.stringify(uniq[0]).slice(0, 1000));
     }
   }
-  if (items.length === 0) {
-    const topKeys = Object.keys(data || {}).join(', ');
-    throw new Error(`No listings array found in __NEXT_DATA__ (top-level keys: ${topKeys}). Check console for structure.`);
+  if (uniq.length === 0) {
+    if (firstErr) throw firstErr;
+    throw new Error(`No listings array found in __NEXT_DATA__ (top-level keys: ${topKeys?.join(', ') || 'none'}). Check console.`);
   }
-  return items.map(normalizeListing);
+  return uniq.map(normalizeListing);
 }
 
 // Score how listing-like an item is by counting fields that look like ad data.
